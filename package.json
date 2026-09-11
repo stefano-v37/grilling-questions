@@ -1,0 +1,25 @@
+{
+  "name": "grilling-questions",
+  "version": "0.1.0",
+  "description": "Answer-the-agent UI for pi: questions the agent asks in ❓ Qn format appear in a side pane next to your editor.",
+  "keywords": ["pi-package", "pi", "coding-agent", "grilling", "socratic", "questions"],
+  "license": "MIT",
+  "type": "module",
+  "author": {
+    "name": "Stefano Vanin"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stefano-v37/grilling-questions.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stefano-v37/grilling-questions/issues"
+  },
+  "scripts": {
+    "test": "node test/grilling-questions.test.mts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
