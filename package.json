@@ -1,8 +1,15 @@
 {
   "name": "grilling-questions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Answer-the-agent UI for pi: questions the agent asks in ❓ Qn format appear in a side pane next to your editor.",
-  "keywords": ["pi-package", "pi", "coding-agent", "grilling", "socratic", "questions"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "grilling",
+    "socratic",
+    "questions"
+  ],
   "license": "MIT",
   "type": "module",
   "author": {

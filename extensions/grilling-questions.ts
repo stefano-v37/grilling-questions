@@ -62,10 +62,17 @@ export function parseQuestions(text: string): Question[] {
 // one included. Submit assembles all stored answers:
 //   Q1: ...
 //   Q2: ...
-// Narrow terminals fall back to pane stacked above the editor.
-const PANE_SHARE = 0.5; // block height = 50% of terminal rows
+// Both dividers are mouse handles: drag the │ seam left/right to resize the
+// split, drag the pane's top ─ border up/down to resize the whole box. The ⇔
+// and ↕ glyphs mark them. Narrow terminals fall back to pane above editor.
+const PANE_SHARE = 0.5; // default block height = 50% of terminal rows
 const MIN_PANE_HEIGHT = 6;
 const MIN_COLUMNS_WIDTH = 60;
+const MIN_SIDE_WIDTH = 20; // neither half shrinks below this in two-column mode
+const RESERVED_ROWS = 4; // rows the box never eats from the transcript/footer
+const DIVIDER = "│";
+const DIVIDER_ACTIVE = "┃";
+const HEIGHT_HANDLE = " ↕ ";
 
 function padLine(line: string, width: number): string {
   const visible = visibleWidth(line);
@@ -78,6 +85,10 @@ export class QuestionState {
   answers: string[] = [];
   activeIndex = 0;
   scrollOffset = 0;
+  // User-dragged dividers - left pane columns and dock rows; both survive
+  // rounds and state.set so the chosen split sticks for the session.
+  splitColumns?: number;
+  splitRows?: number;
   requestRender?: () => void;
 
   set(questions: Question[]): void {
@@ -98,6 +109,7 @@ export class GrillingEditor extends CustomEditor {
   private appOnSubmit?: (text: string) => void;
   private paneSource?: Question[];
   private paneWidth?: number;
+  private drag?: { axis: "x" } | { axis: "y"; screenY: number; start: number };
   private paneLines: string[] = [];
   private paneQuestionStarts: number[] = [];
   private lastLayout?: {
@@ -151,6 +163,24 @@ export class GrillingEditor extends CustomEditor {
       .join("\n");
   }
 
+  private splitWidth(width: number): number {
+    return this.clampSplit(this.questionState.splitColumns ?? Math.floor(width / 2), width);
+  }
+
+  private clampSplit(x: number, width: number): number {
+    return Math.max(MIN_SIDE_WIDTH, Math.min(width - MIN_SIDE_WIDTH, x));
+  }
+
+  private clampRows(rows: number): number {
+    const max = Math.max(MIN_PANE_HEIGHT, this.tui.terminal.rows - RESERVED_ROWS);
+    return Math.max(MIN_PANE_HEIGHT, Math.min(max, Math.round(rows)));
+  }
+
+  private paneHeight(): number {
+    const preferred = this.questionState.splitRows ?? Math.floor(this.tui.terminal.rows * PANE_SHARE);
+    return this.clampRows(preferred);
+  }
+
   private buildPane(width: number): void {
     if (this.paneSource === this.questionState.questions && this.paneWidth === width) return;
 
@@ -179,7 +209,7 @@ export class GrillingEditor extends CustomEditor {
   }
 
   private contentHeight(): number {
-    return Math.max(1, Math.max(MIN_PANE_HEIGHT, Math.floor(this.tui.terminal.rows * PANE_SHARE)) - 2);
+    return Math.max(1, this.paneHeight() - 2);
   }
 
   private maxScroll(): number {
@@ -207,7 +237,7 @@ export class GrillingEditor extends CustomEditor {
     state.answers[state.activeIndex] = this.getText();
     state.activeIndex = next;
     this.setText(state.answers[next] ?? "");
-    this.buildPane(this.lastLayout?.leftWidth ?? MIN_COLUMNS_WIDTH);
+    this.buildPane(this.paneWidth ?? MIN_COLUMNS_WIDTH);
     state.scrollOffset = this.clampScroll(this.paneQuestionStarts[next] ?? 0);
     this.tui.requestRender();
   }
@@ -231,7 +261,13 @@ export class GrillingEditor extends CustomEditor {
     return ` ${this.theme.borderColor(`${question.label}${nav}`)}`;
   }
 
-  private renderPane(width: number, height: number): string[] {
+  // Top border doubles as the height handle, so it carries a ↕ mark.
+  private topBorder(offset: number, width: number): string {
+    const border = this.scrollBorder("↑", offset, width);
+    return border.endsWith("────") ? `${border.slice(0, -3)}${HEIGHT_HANDLE}` : border;
+  }
+
+  private renderPane(width: number, height: number, divider: boolean): string[] {
     this.buildPane(width);
     const contentHeight = Math.max(1, height - 2);
     const offset = this.clampScroll(this.questionState.scrollOffset);
@@ -240,18 +276,19 @@ export class GrillingEditor extends CustomEditor {
     const visible: string[] = [];
     for (let index = 0; index < contentHeight; index++) visible.push(this.paneLines[offset + index] ?? "");
 
-    const lines = [this.theme.borderColor(this.scrollBorder("↑", offset, width))];
+    const lines = [this.theme.borderColor(this.topBorder(offset, width))];
     for (const line of visible) lines.push(padLine(` ${line}`, width));
     lines.push(
       this.theme.borderColor(
         this.scrollBorder("↓", Math.max(0, this.paneLines.length - offset - visible.length), width),
       ),
     );
-    return lines;
+    if (!divider) return lines;
+    return lines.map((line) => `${line}${this.theme.borderColor(this.drag ? DIVIDER_ACTIVE : DIVIDER)}`);
   }
 
   render(width: number): string[] {
-    const paneHeight = Math.max(MIN_PANE_HEIGHT, Math.floor(this.tui.terminal.rows * PANE_SHARE));
+    const paneHeight = this.paneHeight();
 
     if (this.questionState.questions.length === 0) return super.render(width);
 
@@ -260,7 +297,7 @@ export class GrillingEditor extends CustomEditor {
       const header = this.headerLine();
       const editorLines = super.render(width);
       if (header) editorLines.unshift(padLine(header, width));
-      const blockHeight = Math.max(paneHeight, editorLines.length);
+      const blockHeight = paneHeight; // resizable: the pane may shrink below the editor
       this.lastLayout = {
         width,
         wide: false,
@@ -268,10 +305,10 @@ export class GrillingEditor extends CustomEditor {
         leftWidth: width,
         headerRows: header ? 1 : 0,
       };
-      return [...this.renderPane(width, blockHeight), ...editorLines];
+      return [...this.renderPane(width, blockHeight, false), ...editorLines];
     }
 
-    const leftWidth = Math.floor(width / 2);
+    const leftWidth = this.splitWidth(width);
     const rightWidth = width - leftWidth;
     const header = this.headerLine();
     const editorLines = super.render(rightWidth);
@@ -286,7 +323,7 @@ export class GrillingEditor extends CustomEditor {
       while (editorLines.length < blockHeight) editorLines.push("");
     }
 
-    const pane = this.renderPane(leftWidth, blockHeight);
+    const pane = this.renderPane(leftWidth - 1, blockHeight, true);
     const lines: string[] = [];
     for (let row = 0; row < blockHeight; row++) {
       lines.push(padLine(pane[row] ?? "", leftWidth) + padLine(editorLines[row] ?? "", rightWidth));
@@ -310,6 +347,28 @@ export class GrillingEditor extends CustomEditor {
 
     const layout = this.lastLayout?.width === event.width ? this.lastLayout : undefined;
     if (!layout) return super.handleMouse(event);
+
+    // Handles: the top border row drags the dock height, the │ seam (two-column
+    // mode) drags the width. Press captures the pointer; the TUI routes
+    // drag/release back here until release.
+    if (event.type === "press" && event.button === "left") {
+      if (event.y === 0) {
+        this.drag = { axis: "y", screenY: event.screenY, start: layout.paneRows };
+        return { capture: true };
+      }
+      if (layout.wide && Math.abs(event.x - (layout.leftWidth - 1)) <= 1) {
+        this.drag = { axis: "x" };
+        return { capture: true };
+      }
+    }
+    if (event.type === "press") this.drag = undefined; // stale capture, e.g. lost focus mid-drag
+    if (this.drag) {
+      if (event.type === "drag" || event.type === "move") return this.dragResize(event);
+      if (event.type === "release") {
+        this.drag = undefined;
+        return { handled: true };
+      }
+    }
 
     if (layout.wide) {
       if (event.x < layout.leftWidth) {
@@ -342,6 +401,23 @@ export class GrillingEditor extends CustomEditor {
       y: event.y - layout.paneRows - layout.headerRows,
       height: Math.max(1, event.height - layout.paneRows - layout.headerRows),
     });
+  }
+
+  private dragResize(event: TuiMouseEvent): { handled: true } {
+    const drag = this.drag!;
+    if (drag.axis === "x") {
+      const next = this.clampSplit(event.x, event.width);
+      if (next === this.questionState.splitColumns) return { handled: true };
+      this.questionState.splitColumns = next;
+    } else {
+      // The dock is bottom-anchored: screen row is the stable reference while
+      // the top border grows/shrinks under the pointer.
+      const next = this.clampRows(drag.start - (event.screenY - drag.screenY));
+      if (next === this.questionState.splitRows) return { handled: true };
+      this.questionState.splitRows = next;
+    }
+    this.tui.requestRender();
+    return { handled: true };
   }
 }
 

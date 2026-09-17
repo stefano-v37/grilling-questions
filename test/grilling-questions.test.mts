@@ -81,7 +81,7 @@ for (let i = 3; i < 19; i++) assert(right(i).trim() === "", `editor interior row
 
 // multi-line question text keeps its line breaks in the left pane
 state.set([{ label: "Q1", text: "first line\nsecond line\nthird line" }]);
-const paneRows = editor.render(W).map((l) => sliceByColumn(l, 0, LEFT).trim());
+const paneRows = editor.render(W).map((l) => sliceByColumn(l, 0, LEFT - 1).trim());
 const secondRow = paneRows.indexOf("second line");
 assert(secondRow > 0 && paneRows[secondRow + 1] === "third line", "multi-line question keeps its line breaks");
 state.set(questions); // restore the sample
@@ -158,6 +158,58 @@ assert(sliceByColumn(last[last.length - 1]!, 0, LEFT).includes("↓") === false,
 const paneOff = state.scrollOffset;
 editor.handleMouse({ type: "wheel", button: "none", x: 90, y: 5, screenX: 90, screenY: 5, width: W, height: 20, shift: false, alt: false, ctrl: false, wheelDelta: 5 } as any);
 assert(state.scrollOffset === paneOff, "wheel over editor column leaves pane alone");
+
+// --- mouse drag resizes the split (divider at leftWidth-1) ---
+state.splitColumns = undefined;
+editor.render(W); // 50/50: divider column at LEFT-1
+const mouse = (over: Record<string, unknown>) =>
+  ({ type: "press", button: "left", x: LEFT - 1, y: 5, screenX: LEFT - 1, screenY: 5, width: W, height: 20, shift: false, alt: false, ctrl: false, ...over }) as any;
+assert(editor.handleMouse(mouse({}))?.capture === true, "press on the divider captures the drag");
+assert(editor.handleMouse(mouse({ type: "drag", x: 90 }))?.handled === true, "drag is handled while resizing");
+assert(state.splitColumns === 90, `drag moves the divider, got ${state.splitColumns}`);
+assert(sliceByColumn(editor.render(W)[2]!, 89, 1) === "┃", "active drag highlights the divider");
+editor.handleMouse(mouse({ type: "release" }));
+const resized = editor.render(W);
+assert(sliceByColumn(resized[2]!, 89, 1) === "│", "divider renders at the dragged position");
+assert(editor.handleMouse(mouse({ type: "drag", x: 60 }))?.handled === true, "drag after release is not swallowed");
+assert(state.splitColumns === 90, "split stays put after release");
+
+// clamped so neither half can be swallowed
+editor.render(W);
+editor.handleMouse(mouse({ x: 89 })); // press on the seam at the current 90/30 split
+editor.handleMouse(mouse({ type: "drag", x: 2 }));
+assert(state.splitColumns === 20, `left clamp, got ${state.splitColumns}`);
+editor.handleMouse(mouse({ type: "drag", x: 500 }));
+assert(state.splitColumns === W - 20, `right clamp, got ${state.splitColumns}`);
+editor.handleMouse(mouse({ type: "release" }));
+
+// --- vertical drag on the top border resizes the dock height ---
+state.splitColumns = undefined;
+state.splitRows = undefined;
+tui.terminal.rows = 40; // the navigation section left it at 12
+editor.render(W); // 50/50 at 40 rows: pane height 20
+const top = (over: Record<string, unknown>) => mouse({ x: 5, y: 0, screenX: 5, screenY: 5, ...over });
+assert(sliceByColumn(editor.render(W)[0]!, LEFT - 4, 3) === " ↕ ", "top border carries the ↕ handle");
+assert(editor.handleMouse(top({}))?.capture === true, "press on the top border captures the height drag");
+editor.handleMouse(top({ type: "drag", screenY: 0 })); // pointer 5 rows up
+assert(state.splitRows === 25, `drag up grows the box, got ${state.splitRows}`);
+assert(editor.render(W).length === 25, "box height follows the drag");
+editor.handleMouse(top({ type: "release" }));
+
+// clamped: never below MIN_PANE_HEIGHT, never eats the reserved rows
+editor.render(W);
+assert(editor.handleMouse(top({}))?.capture === true, "press on the top border captures again");
+editor.handleMouse(top({ type: "drag", screenY: 500 }));
+assert(state.splitRows === 6, `height floor, got ${state.splitRows}`);
+editor.handleMouse(top({ type: "drag", screenY: -500 }));
+assert(state.splitRows === 36, `height ceiling, got ${state.splitRows}`);
+editor.handleMouse(top({ type: "release" }));
+state.splitRows = undefined; // later layout checks assume the 50% default
+tui.terminal.rows = 12;
+
+// a press away from the divider does not capture, and a plain press on the pane is still just handled
+assert(editor.handleMouse(mouse({ x: 5 }))?.capture !== true, "press inside the pane does not capture");
+state.splitColumns = undefined; // later layout checks assume 50/50
 
 // --- narrow stacked fallback ---
 const narrow = editor.render(50);

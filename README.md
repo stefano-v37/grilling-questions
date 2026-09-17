@@ -7,6 +7,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that turns t
 ## How it works
 
 - Any assistant message containing lines starting with `❓ Qn` is parsed into questions and shown in the left pane, styled like the transcript. The right pane is the normal editor, one question at a time - a header above it shows which one is active (`Q2 (2/5)`).
+- The `│` column between the panes is draggable: click-hold it and drag to resize the split left/right (each side keeps a 20-column minimum; the width sticks for the session). The pane's top `─` border is draggable too: drag it up/down to grow or shrink the box height (it never eats the transcript). The `↕` mark on the top border shows where the height handle is.
 - Submitting sends all answers in one message:
   ```
   Q1: after the refactor, the old tests are deleted
@@ -24,6 +25,8 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that turns t
 | `shift+↑` / `shift+↓` | scroll the pane one line |
 | `shift+pageup` / `shift+pagedown` | scroll the pane a full page |
 | mouse wheel | scroll the pane; falls through to transcript scrolling when the pane is at its edge |
+| mouse drag on the `│` divider | resize the question pane / editor split |
+| mouse drag on the top `─` border | grow / shrink the question box height |
 
 On terminals narrower than 60 columns the pane stacks above the editor instead of side-by-side.
 
